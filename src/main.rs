@@ -44,14 +44,14 @@ async fn get_repos(config_path: &Path) -> anyhow::Result<Vec<Arc<NuGet>>> {
     let mut handles: Vec<JoinHandle<anyhow::Result<_>>> = Vec::new();
 
     loop {
-        match reader.read_event(&mut buf)? {
-            Event::Empty(s) | Event::Start(s) if s.name() == b"add" => {
+        match reader.read_event_into(&mut buf)? {
+            Event::Empty(s) | Event::Start(s) if s.name().as_ref() == b"add" => {
                 let attr = s
                     .attributes()
-                    .find(|a| a.as_ref().unwrap().key == b"value")
+                    .find(|a| a.as_ref().unwrap().key.as_ref() == b"value")
                     .unwrap()?;
 
-                let url = String::from_utf8(attr.unescaped_value()?.into_owned())?;
+                let url = String::from_utf8(attr.unescape_value()?.into_owned().into())?;
 
                 if let Ok(url) = Url::parse(&url) {
                     handles.push(tokio::spawn(
@@ -59,7 +59,7 @@ async fn get_repos(config_path: &Path) -> anyhow::Result<Vec<Arc<NuGet>>> {
                     ));
                 }
             }
-            Event::End(s) if s.name() == b"packageSources" => break,
+            Event::End(s) if s.name().as_ref() == b"packageSources" => break,
             Event::Eof => break,
             _ => {}
         }
