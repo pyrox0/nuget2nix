@@ -42,7 +42,7 @@ impl NuGet {
                     .join(&format!("{}/index.json", package))
                     .ok()?;
 
-                let index: VersionIndex = this
+                let response: serde_json::Value = this
                     .client
                     .get(url.as_str())
                     .send()
@@ -54,7 +54,21 @@ impl NuGet {
                     .await
                     .ok()?;
 
-                Some(index.versions)
+                let vec = if let Some(json_object) = response.as_object() {
+                    if json_object.contains_key("versions") {
+                        let index: VersionIndex = serde_json::from_value(response).unwrap();
+                        index.versions
+                    } else {
+                        let response: RegistrationResponse = serde_json::from_value(response).unwrap();
+                        let leaves = response.items.iter().flat_map(|x| &x.items).collect::<Vec<&RegistrationLeaf>>();
+                        let versions = leaves.iter().map(|x| x.catalog_entry.version.to_owned()).collect::<Vec<String>>();
+                        versions
+                    }
+                } else {
+                    Vec::new()
+                };
+
+                Some(vec)
             }
 
             self.package_cache
@@ -103,4 +117,25 @@ struct Resource {
 #[derive(Deserialize)]
 struct VersionIndex {
     versions: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct RegistrationResponse {
+    items: Vec<RegistrationPage>,
+}
+
+#[derive(Deserialize)]
+struct RegistrationPage {
+    items: Vec<RegistrationLeaf>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistrationLeaf {
+    catalog_entry: CatalogEntry,
+}
+
+#[derive(Deserialize)]
+struct CatalogEntry {
+    version: String,
 }
