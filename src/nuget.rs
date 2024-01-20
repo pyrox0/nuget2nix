@@ -1,3 +1,4 @@
+use anyhow::Error;
 use dashmap::DashMap;
 use serde::Deserialize;
 use url::Url;
@@ -16,12 +17,14 @@ impl NuGet {
 
         let index: ServiceIndex = client.get(url).send().await?.json().await?;
 
-        let package_base_address = index
+        let mut package_base_address = index
             .resources
             .into_iter()
             .find(|r| r.typ == "PackageBaseAddress/3.0.0")
             .unwrap()
             .url;
+
+        package_base_address.path_segments_mut().map_err(|_|Error::msg("cannot-be-a-base"))?.pop_if_empty().push("");
 
         Ok(NuGet {
             client,
