@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf};
 
 use anyhow::Error;
 use glob::glob;
@@ -8,8 +8,8 @@ use serde::Deserialize;
 use url::Url;
 
 pub struct NuGet {
-    client: Arc<Client>,
-    cache: Arc<MyCache>,
+    client: Client,
+    cache: MyCache,
     pub packages: Vec<PackageData>,
 }
 
@@ -18,8 +18,8 @@ impl NuGet {
         let packages = read_package_dir(package_dir)?;
 
         return Ok(NuGet {
-            client: Arc::new(Client::new()),
-            cache: Arc::new(MyCache::new()),
+            client: Client::new(),
+            cache: MyCache::new(),
             packages,
         });
     }

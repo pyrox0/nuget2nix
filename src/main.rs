@@ -1,7 +1,6 @@
 #![warn(clippy::pedantic)]
 use nuget::download_url;
 use std::env;
-use std::sync::Arc;
 use url::Url;
 
 use crate::nuget::NuGet;
@@ -21,31 +20,25 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let dir = &args[1];
 
-    let nuget = Arc::new(NuGet::new(dir.into())?);
-
-    let mut futures = Vec::new();
-    for pkg in nuget.packages.clone() {
-        let nuget = nuget.clone();
-        let fut = get_fetch_nuget_args(&pkg, nuget);
-        futures.push(fut);
-    }
+    let nuget = NuGet::new(dir.into())?;
 
     println!("{{fetchNuGet}}: [");
 
-    for fut in futures {
-        let res = fut?;
+    for pkg in nuget.packages.clone() {
+        let res = get_fetch_nuget_args(&pkg, &nuget)?;
 
         println!(
             "  (fetchNuGet {{ pname = \"{}\"; version = \"{}\"; url = \"{}\"; sha256 = \"{}\"; }})",
             res.pname, res.version, res.url, res.sha256
         );
     }
+
     println!("]");
 
     Ok(())
 }
 
-fn get_fetch_nuget_args(pkg: &PackageData, nuget: Arc<NuGet>) -> anyhow::Result<Res> {
+fn get_fetch_nuget_args(pkg: &PackageData, nuget: &NuGet) -> anyhow::Result<Res> {
     let package_base_address = nuget.get_package_base_address(&pkg)?;
     let package_id = pkg.id.to_string();
     let url = download_url(&package_base_address, &package_id, &pkg.version)?;
