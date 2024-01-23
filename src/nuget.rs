@@ -1,99 +1,136 @@
-use anyhow::Error;
-use dashmap::DashMap;
+use std::{fs, path::PathBuf, sync::Arc};
+
+use anyhow::{Context, Error};
+use camino::Utf8PathBuf;
+use glob::glob;
+use quick_cache::sync::Cache;
+use reqwest::Client;
 use serde::Deserialize;
 use url::Url;
 
-const NUGET_ORG_INDEX_URL: &str = "https://api.nuget.org/v3/index.json";
-
 pub struct NuGet {
-    client: reqwest::Client,
-    package_base_address: Url,
-    package_cache: DashMap<String, Option<Vec<String>>>,
+    client: Arc<reqwest::Client>,
+    cache: Arc<MyCache>,
+    pub packages: Vec<PackageData>,
 }
 
 impl NuGet {
-    pub async fn new(url: Url) -> anyhow::Result<NuGet> {
-        let client = reqwest::Client::new();
+    pub fn new(package_dir: Utf8PathBuf) -> anyhow::Result<NuGet> {
+        let packages = read_package_dir(package_dir)?;
 
-        let index: ServiceIndex = client.get(url).send().await?.json().await?;
-
-        let mut package_base_address = index
-            .resources
-            .into_iter()
-            .find(|r| r.typ == "PackageBaseAddress/3.0.0")
-            .unwrap()
-            .url;
-
-        package_base_address.path_segments_mut().map_err(|_|Error::msg("cannot-be-a-base"))?.pop_if_empty().push("");
-
-        Ok(NuGet {
-            client,
-            package_base_address,
-            package_cache: DashMap::new(),
-        })
+        return Ok(NuGet {
+            client: Arc::new(Client::new()),
+            cache: Arc::new(MyCache::new(packages.len())),
+            packages,
+        });
     }
 
-    pub async fn nuget_org() -> anyhow::Result<NuGet> {
-        NuGet::new(Url::parse(NUGET_ORG_INDEX_URL)?).await
+    pub async fn get_package_base_address(&self, pkg: &PackageData) -> anyhow::Result<Url> {
+        let source = &pkg.source;
+
+        let package_base_address = self
+            .cache
+            .package_base_address
+            .get_or_insert_async(&source.to_string(), async {
+                let index: ServiceIndex =
+                    self.client.get(source.clone()).send().await?.json().await?;
+
+                let mut package_base_address = index
+                    .resources
+                    .into_iter()
+                    .find(|r| r.typ == "PackageBaseAddress/3.0.0")
+                    .unwrap()
+                    .url;
+
+                package_base_address
+                    .path_segments_mut()
+                    .map_err(|_| Error::msg("cannot-be-a-base"))?
+                    .pop_if_empty()
+                    .push("");
+
+                Ok::<Url, Error>(package_base_address)
+            })
+            .await?;
+
+        Ok(package_base_address)
     }
 
-    pub async fn exists(&self, package: &str, version: &str) -> bool {
-        if !self.package_cache.contains_key(package) {
-            async fn get(this: &NuGet, package: &str) -> Option<Vec<String>> {
-                let url = this
-                    .package_base_address
-                    .join(&format!("{}/index.json", package))
-                    .ok()?;
+    pub async fn get_package_versions(
+        &self,
+        pkg: &PackageData,
+        package_base_address: &Url,
+    ) -> anyhow::Result<Vec<String>> {
+        let package_id = &pkg.id;
 
-                let response: serde_json::Value = this
+        let package_versions = self
+            .cache
+            .package_versions
+            .get_or_insert_async(&(package_base_address.to_string(), package_id.to_string()), async {
+                let package_index_url = package_base_address
+                    .join(&format!("{}/index.json", package_id))
+                    .ok()
+                    .unwrap();
+
+                let response: VersionIndex = self
                     .client
-                    .get(url.as_str())
+                    .get(package_index_url.as_str())
                     .send()
                     .await
-                    .ok()?
+                    .ok()
+                    .context("package_index_url send failed")?
                     .error_for_status()
-                    .ok()?
+                    .ok()
+                    .context(package_index_url)?
                     .json()
                     .await
-                    .ok()?;
+                    .ok()
+                    .context("package_index_url deserialize error")?;
 
-                let vec = if let Some(json_object) = response.as_object() {
-                    if json_object.contains_key("versions") {
-                        let index: VersionIndex = serde_json::from_value(response).unwrap();
-                        index.versions
-                    } else {
-                        let response: RegistrationResponse = serde_json::from_value(response).unwrap();
-                        let leaves = response.items.iter().flat_map(|x| &x.items).collect::<Vec<&RegistrationLeaf>>();
-                        let versions = leaves.iter().map(|x| x.catalog_entry.version.to_owned()).collect::<Vec<String>>();
-                        versions
-                    }
-                } else {
-                    Vec::new()
-                };
+                Ok::<Vec<String>, Error>(response.versions)
+            })
+            .await?;
 
-                Some(vec)
-            }
+        Ok(package_versions)
+    }
+}
 
-            self.package_cache
-                .insert(package.to_string(), get(self, package).await);
-        }
+pub fn version_exists(pkg: &PackageData, package_versions: &Vec<String>) -> bool {
+    package_versions.contains(&normalize_version(&pkg.version).to_string())
+}
 
-        let cache_entry = self.package_cache.get(package).unwrap();
+pub fn download_url(
+    package_base_address: &Url,
+    package_id: &String,
+    version: &String,
+) -> anyhow::Result<Url> {
+    return Ok(package_base_address.join(&format!(
+        "{package_id}/{version}/{package_id}.{version}.nupkg"
+    ))?);
+}
 
-        cache_entry.is_some()
-            && cache_entry
-                .as_ref()
-                .unwrap()
-                .contains(&normalize_version(version).to_string())
+fn read_package_dir(package_dir: Utf8PathBuf) -> anyhow::Result<Vec<PackageData>> {
+    let mut packages = Vec::new();
+
+    for mut path in glob(package_dir.join("**/*.nuspec").as_str())?.map(Result::unwrap) {
+        let nuspec: Nuspec = quick_xml::de::from_str(&fs::read_to_string(&path)?)?;
+
+        assert!(path.pop());
+
+        let nupkg_path = glob(path.join("*.nupkg").to_str().unwrap())?
+            .next()
+            .unwrap()?;
+
+        let nupkg_metadata_path = glob(path.join(".nupkg.metadata").to_str().unwrap())?
+            .next()
+            .unwrap()?;
+
+        let nupkg_metadata: NupkgMetadata =
+            serde_json::from_str(&fs::read_to_string(&nupkg_metadata_path)?)?;
+
+        packages.push(PackageData::new(nuspec, nupkg_path, nupkg_metadata));
     }
 
-    pub fn url(&self, package: &str, version: &str) -> anyhow::Result<Url> {
-        Ok(self.package_base_address.join(&format!(
-            "{package}/{version}/{package}.{version}.nupkg",
-            package = package.to_ascii_lowercase(),
-            version = normalize_version(version)
-        ))?)
-    }
+    Ok(packages)
 }
 
 fn normalize_version(mut version: &str) -> &str {
@@ -122,23 +159,53 @@ struct VersionIndex {
     versions: Vec<String>,
 }
 
-#[derive(Deserialize)]
-struct RegistrationResponse {
-    items: Vec<RegistrationPage>,
+#[derive(Debug, Clone)]
+pub struct PackageData {
+    pub id: String,
+    pub version: String,
+    pub source: Url,
+    pub nupkg_path: PathBuf,
+}
+
+impl PackageData {
+    fn new(nuspec: Nuspec, nupkg_path: PathBuf, nupkg_metadata: NupkgMetadata) -> PackageData {
+        PackageData {
+            id: nuspec.metadata.id,
+            version: nuspec.metadata.version,
+            source: nupkg_metadata.source,
+            nupkg_path,
+        }
+    }
 }
 
 #[derive(Deserialize)]
-struct RegistrationPage {
-    items: Vec<RegistrationLeaf>,
+struct NupkgMetadata {
+    source: Url,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RegistrationLeaf {
-    catalog_entry: CatalogEntry,
+struct Nuspec {
+    metadata: NuspecMetadata,
 }
 
 #[derive(Deserialize)]
-struct CatalogEntry {
+struct NuspecMetadata {
+    id: String,
     version: String,
+}
+
+
+
+struct MyCache {
+    package_base_address: Cache<String, Url>,
+    package_versions: Cache<(String, String), Vec<String>>,
+}
+
+impl MyCache {
+    fn new(size: usize) -> Self {
+        Self {
+            package_base_address: Cache::new(10),
+            package_versions: Cache::new(size),
+        }
+    }
 }
