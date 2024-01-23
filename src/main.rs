@@ -17,13 +17,21 @@ fn main() -> anyhow::Result<()> {
     for pkg in nuget.packages.clone() {
         let pname = &pkg.id;
         let version = &pkg.version;
-        let url = nuget.get_download_url(&pkg)?;
         let sha256 = nix_hash::hash(&pkg.nupkg_path)?;
 
-        println!(
-            "  (fetchNuGet {{ pname = \"{}\"; version = \"{}\"; url = \"{}\"; sha256 = \"{}\"; }})",
-            pname, version, url, sha256
-        );
+        if pkg.source.to_string() != "https://api.nuget.org/v3/index.json" {
+            let url = nuget.get_download_url(&pkg)?;
+
+            println!(
+                "  (fetchNuGet {{ pname = \"{}\"; version = \"{}\"; sha256 = \"{}\"; url = \"{}\"; }})",
+                pname, version, sha256, url
+            );
+        } else {
+            println!(
+                "  (fetchNuGet {{ pname = \"{}\"; version = \"{}\"; sha256 = \"{}\"; }})",
+                pname, version, sha256
+            );
+        }
     }
 
     println!("]");
