@@ -1,7 +1,6 @@
 #![warn(clippy::pedantic)]
-use camino::Utf8PathBuf;
 use nuget::download_url;
-use pico_args::Arguments;
+use std::env;
 use std::sync::Arc;
 use url::Url;
 
@@ -20,10 +19,10 @@ struct Res {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut args = Arguments::from_env();
-    let dir: Utf8PathBuf = args.value_from_str("--directory")?;
+    let args: Vec<String> = env::args().collect();
+    let dir = &args[1];
 
-    let nuget = Arc::new(NuGet::new(dir)?);
+    let nuget = Arc::new(NuGet::new(dir.into())?);
 
     let mut futures = Vec::new();
     for pkg in nuget.packages.clone() {

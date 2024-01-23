@@ -1,7 +1,6 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use anyhow::Error;
-use camino::Utf8PathBuf;
 use glob::glob;
 use quick_cache::sync::Cache;
 use reqwest::Client;
@@ -15,7 +14,7 @@ pub struct NuGet {
 }
 
 impl NuGet {
-    pub fn new(package_dir: Utf8PathBuf) -> anyhow::Result<NuGet> {
+    pub fn new(package_dir: PathBuf) -> anyhow::Result<NuGet> {
         let packages = read_package_dir(package_dir)?;
 
         return Ok(NuGet {
@@ -66,10 +65,10 @@ pub fn download_url(
     ))?);
 }
 
-fn read_package_dir(package_dir: Utf8PathBuf) -> anyhow::Result<Vec<PackageData>> {
+fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<PackageData>> {
     let mut packages = Vec::new();
 
-    for mut path in glob(package_dir.join("**/*.nuspec").as_str())?.map(Result::unwrap) {
+    for mut path in glob(package_dir.join("**/*.nuspec").to_str().unwrap())?.map(Result::unwrap) {
         let nuspec: Nuspec = quick_xml::de::from_str(&fs::read_to_string(&path)?)?;
 
         assert!(path.pop());
