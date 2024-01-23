@@ -10,7 +10,7 @@ use url::Url;
 pub struct NuGet {
     client: Client,
     package_base_address_cache: Cache<String, Url>,
-    pub packages: Vec<PackageData>,
+    pub packages: Vec<Package>,
 }
 
 impl NuGet {
@@ -24,7 +24,17 @@ impl NuGet {
         });
     }
 
-    pub fn get_package_base_address(&self, pkg: &PackageData) -> anyhow::Result<Url> {
+    pub fn get_download_url(&self, pkg: &Package) -> anyhow::Result<Url> {
+        let package_base_address = self.get_package_base_address(&pkg)?;
+        let package_id = &pkg.id;
+        let version = &pkg.version;
+
+        return Ok(package_base_address.join(&format!(
+            "{package_id}/{version}/{package_id}.{version}.nupkg"
+        ))?);
+    }
+
+    fn get_package_base_address(&self, pkg: &Package) -> anyhow::Result<Url> {
         let source = &pkg.source;
 
         let package_base_address =
@@ -50,19 +60,9 @@ impl NuGet {
 
         Ok(package_base_address)
     }
-
-    pub fn get_download_url(&self, pkg: &PackageData) -> anyhow::Result<Url> {
-        let package_base_address = self.get_package_base_address(&pkg)?;
-        let package_id = &pkg.id;
-        let version = &pkg.version;
-
-        return Ok(package_base_address.join(&format!(
-            "{package_id}/{version}/{package_id}.{version}.nupkg"
-        ))?);
-    }
 }
 
-fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<PackageData>> {
+fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<Package>> {
     let mut packages = Vec::new();
 
     for mut path in glob(package_dir.join("**/*.nuspec").to_str().unwrap())?.map(Result::unwrap) {
@@ -81,7 +81,12 @@ fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<PackageData>> {
         let nupkg_metadata: NupkgMetadata =
             serde_json::from_str(&fs::read_to_string(&nupkg_metadata_path)?)?;
 
-        packages.push(PackageData::new(nuspec, nupkg_path, nupkg_metadata));
+        packages.push(Package {
+            id: nuspec.metadata.id,
+            version: nuspec.metadata.version,
+            source: nupkg_metadata.source,
+            nupkg_path,
+        });
     }
 
     Ok(packages)
@@ -101,22 +106,11 @@ struct Resource {
 }
 
 #[derive(Debug, Clone)]
-pub struct PackageData {
+pub struct Package {
     pub id: String,
     pub version: String,
     pub source: Url,
     pub nupkg_path: PathBuf,
-}
-
-impl PackageData {
-    fn new(nuspec: Nuspec, nupkg_path: PathBuf, nupkg_metadata: NupkgMetadata) -> PackageData {
-        PackageData {
-            id: nuspec.metadata.id,
-            version: nuspec.metadata.version,
-            source: nupkg_metadata.source,
-            nupkg_path,
-        }
-    }
 }
 
 #[derive(Deserialize)]
