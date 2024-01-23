@@ -9,7 +9,7 @@ use url::Url;
 
 pub struct NuGet {
     client: Client,
-    cache: MyCache,
+    package_base_address_cache: Cache<String, Url>,
     pub packages: Vec<PackageData>,
 }
 
@@ -19,7 +19,7 @@ impl NuGet {
 
         return Ok(NuGet {
             client: Client::new(),
-            cache: MyCache::new(),
+            package_base_address_cache: Cache::new(10),
             packages,
         });
     }
@@ -28,8 +28,7 @@ impl NuGet {
         let source = &pkg.source;
 
         let package_base_address =
-            self.cache
-                .package_base_address
+            self.package_base_address_cache
                 .get_or_insert_with(&source.to_string(), || {
                     let index: ServiceIndex = self.client.get(source.clone()).send()?.json()?;
 
@@ -51,16 +50,16 @@ impl NuGet {
 
         Ok(package_base_address)
     }
-}
 
-pub fn download_url(
-    package_base_address: &Url,
-    package_id: &String,
-    version: &String,
-) -> anyhow::Result<Url> {
-    return Ok(package_base_address.join(&format!(
-        "{package_id}/{version}/{package_id}.{version}.nupkg"
-    ))?);
+    pub fn get_download_url(&self, pkg: &PackageData) -> anyhow::Result<Url> {
+        let package_base_address = self.get_package_base_address(&pkg)?;
+        let package_id = &pkg.id;
+        let version = &pkg.version;
+
+        return Ok(package_base_address.join(&format!(
+            "{package_id}/{version}/{package_id}.{version}.nupkg"
+        ))?);
+    }
 }
 
 fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<PackageData>> {
@@ -134,16 +133,4 @@ struct Nuspec {
 struct NuspecMetadata {
     id: String,
     version: String,
-}
-
-struct MyCache {
-    package_base_address: Cache<String, Url>,
-}
-
-impl MyCache {
-    fn new() -> Self {
-        Self {
-            package_base_address: Cache::new(10),
-        }
-    }
 }
