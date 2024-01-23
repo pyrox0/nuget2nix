@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 use camino::Utf8PathBuf;
 use glob::glob;
 use quick_cache::sync::Cache;
@@ -20,7 +20,7 @@ impl NuGet {
 
         return Ok(NuGet {
             client: Arc::new(Client::new()),
-            cache: Arc::new(MyCache::new(packages.len())),
+            cache: Arc::new(MyCache::new()),
             packages,
         });
     }
@@ -54,48 +54,6 @@ impl NuGet {
 
         Ok(package_base_address)
     }
-
-    pub async fn get_package_versions(
-        &self,
-        pkg: &PackageData,
-        package_base_address: &Url,
-    ) -> anyhow::Result<Vec<String>> {
-        let package_id = &pkg.id;
-
-        let package_versions = self
-            .cache
-            .package_versions
-            .get_or_insert_async(&(package_base_address.to_string(), package_id.to_string()), async {
-                let package_index_url = package_base_address
-                    .join(&format!("{}/index.json", package_id))
-                    .ok()
-                    .unwrap();
-
-                let response: VersionIndex = self
-                    .client
-                    .get(package_index_url.as_str())
-                    .send()
-                    .await
-                    .ok()
-                    .context("package_index_url send failed")?
-                    .error_for_status()
-                    .ok()
-                    .context(package_index_url)?
-                    .json()
-                    .await
-                    .ok()
-                    .context("package_index_url deserialize error")?;
-
-                Ok::<Vec<String>, Error>(response.versions)
-            })
-            .await?;
-
-        Ok(package_versions)
-    }
-}
-
-pub fn version_exists(pkg: &PackageData, package_versions: &Vec<String>) -> bool {
-    package_versions.contains(&normalize_version(&pkg.version).to_string())
 }
 
 pub fn download_url(
@@ -133,14 +91,6 @@ fn read_package_dir(package_dir: Utf8PathBuf) -> anyhow::Result<Vec<PackageData>
     Ok(packages)
 }
 
-fn normalize_version(mut version: &str) -> &str {
-    if let Some((ver, _)) = version.split_once('+') {
-        version = ver;
-    }
-
-    version
-}
-
 #[derive(Deserialize)]
 struct ServiceIndex {
     resources: Vec<Resource>,
@@ -152,11 +102,6 @@ struct Resource {
     url: Url,
     #[serde(rename = "@type")]
     typ: String,
-}
-
-#[derive(Deserialize)]
-struct VersionIndex {
-    versions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,18 +139,14 @@ struct NuspecMetadata {
     version: String,
 }
 
-
-
 struct MyCache {
     package_base_address: Cache<String, Url>,
-    package_versions: Cache<(String, String), Vec<String>>,
 }
 
 impl MyCache {
-    fn new(size: usize) -> Self {
+    fn new() -> Self {
         Self {
             package_base_address: Cache::new(10),
-            package_versions: Cache::new(size),
         }
     }
 }
