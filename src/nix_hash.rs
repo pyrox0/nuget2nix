@@ -1,5 +1,5 @@
+use sha2::{Digest, Sha256};
 use nix_base32::to_nix_base32;
-use ring::digest::{Context, Digest, SHA256};
 use std::{
     fs::File,
     io::{BufReader, Read},
@@ -8,14 +8,9 @@ use std::{
 
 pub fn hash(path: &PathBuf) -> anyhow::Result<String> {
     let input = File::open(path)?;
-    let reader = BufReader::new(input);
-    let digest = sha256_digest(reader);
+    let mut reader = BufReader::new(input);
 
-    Ok(to_nix_base32(digest?.as_ref()))
-}
-
-fn sha256_digest<R: Read>(mut reader: R) -> anyhow::Result<Digest> {
-    let mut context = Context::new(&SHA256);
+    let mut context = Sha256::new();
     let mut buffer = [0; 1024];
 
     loop {
@@ -26,5 +21,5 @@ fn sha256_digest<R: Read>(mut reader: R) -> anyhow::Result<Digest> {
         context.update(&buffer[..count]);
     }
 
-    Ok(context.finish())
+    Ok(to_nix_base32(context.finalize().as_ref()))
 }
