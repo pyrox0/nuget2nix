@@ -3,12 +3,12 @@ use std::{fs, path::PathBuf, sync::Arc};
 use anyhow::Error;
 use glob::glob;
 use quick_cache::sync::Cache;
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::Deserialize;
 use url::Url;
 
 pub struct NuGet {
-    client: Arc<reqwest::Client>,
+    client: Arc<Client>,
     cache: Arc<MyCache>,
     pub packages: Vec<PackageData>,
 }
@@ -24,32 +24,30 @@ impl NuGet {
         });
     }
 
-    pub async fn get_package_base_address(&self, pkg: &PackageData) -> anyhow::Result<Url> {
+    pub fn get_package_base_address(&self, pkg: &PackageData) -> anyhow::Result<Url> {
         let source = &pkg.source;
 
-        let package_base_address = self
-            .cache
-            .package_base_address
-            .get_or_insert_async(&source.to_string(), async {
-                let index: ServiceIndex =
-                    self.client.get(source.clone()).send().await?.json().await?;
+        let package_base_address =
+            self.cache
+                .package_base_address
+                .get_or_insert_with(&source.to_string(), || {
+                    let index: ServiceIndex = self.client.get(source.clone()).send()?.json()?;
 
-                let mut package_base_address = index
-                    .resources
-                    .into_iter()
-                    .find(|r| r.typ == "PackageBaseAddress/3.0.0")
-                    .unwrap()
-                    .url;
+                    let mut package_base_address = index
+                        .resources
+                        .into_iter()
+                        .find(|r| r.typ == "PackageBaseAddress/3.0.0")
+                        .unwrap()
+                        .url;
 
-                package_base_address
-                    .path_segments_mut()
-                    .map_err(|_| Error::msg("cannot-be-a-base"))?
-                    .pop_if_empty()
-                    .push("");
+                    package_base_address
+                        .path_segments_mut()
+                        .map_err(|_| Error::msg("cannot-be-a-base"))?
+                        .pop_if_empty()
+                        .push("");
 
-                Ok::<Url, Error>(package_base_address)
-            })
-            .await?;
+                    Ok::<Url, Error>(package_base_address)
+                })?;
 
         Ok(package_base_address)
     }

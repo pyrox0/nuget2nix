@@ -17,8 +17,7 @@ struct Res {
     sha256: String,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let dir = &args[1];
 
@@ -27,14 +26,14 @@ async fn main() -> anyhow::Result<()> {
     let mut futures = Vec::new();
     for pkg in nuget.packages.clone() {
         let nuget = nuget.clone();
-        let fut = tokio::spawn(async move { get_fetch_nuget_args(&pkg, nuget).await });
+        let fut = get_fetch_nuget_args(&pkg, nuget);
         futures.push(fut);
     }
 
     println!("{{fetchNuGet}}: [");
 
     for fut in futures {
-        let res = fut.await??;
+        let res = fut?;
 
         println!(
             "  (fetchNuGet {{ pname = \"{}\"; version = \"{}\"; url = \"{}\"; sha256 = \"{}\"; }})",
@@ -46,8 +45,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_fetch_nuget_args(pkg: &PackageData, nuget: Arc<NuGet>) -> anyhow::Result<Res> {
-    let package_base_address = nuget.get_package_base_address(&pkg).await?;
+fn get_fetch_nuget_args(pkg: &PackageData, nuget: Arc<NuGet>) -> anyhow::Result<Res> {
+    let package_base_address = nuget.get_package_base_address(&pkg)?;
     let package_id = pkg.id.to_string();
     let url = download_url(&package_base_address, &package_id, &pkg.version)?;
     let sha256 = nix_hash::hash(&pkg.nupkg_path)?;
