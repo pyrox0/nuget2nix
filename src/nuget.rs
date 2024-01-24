@@ -1,4 +1,9 @@
-use std::{fs, path::PathBuf};
+use std::{
+    collections::HashSet,
+    fs::{self, File},
+    io::{self, BufRead},
+    path::{Path, PathBuf},
+};
 
 use anyhow::Error;
 use glob::glob;
@@ -14,8 +19,8 @@ pub struct NuGet {
 }
 
 impl NuGet {
-    pub fn new(package_dir: PathBuf) -> anyhow::Result<NuGet> {
-        let packages = read_package_dir(package_dir)?;
+    pub fn new(package_dir: PathBuf, exclude_file: Option<PathBuf>) -> anyhow::Result<NuGet> {
+        let packages = read_package_dir(package_dir, exclude_file)?;
 
         return Ok(NuGet {
             client: Client::new(),
@@ -62,8 +67,16 @@ impl NuGet {
     }
 }
 
-fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<Package>> {
+fn read_package_dir(
+    package_dir: PathBuf,
+    exclude_file: Option<PathBuf>,
+) -> anyhow::Result<Vec<Package>> {
     let mut packages = Vec::new();
+
+    let excluded_packages: HashSet<String> = match exclude_file {
+        Some(it) => HashSet::from_iter(read_lines(it)?.flatten()),
+        None => HashSet::new(),
+    };
 
     for mut path in glob(package_dir.join("**/*.nuspec").to_str().unwrap())?.map(Result::unwrap) {
         let nuspec: Nuspec = quick_xml::de::from_str(&fs::read_to_string(&path)?)?;
@@ -74,6 +87,12 @@ fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<Package>> {
             .next()
             .unwrap()?;
 
+        // Skip packages that have been excluded
+        if excluded_packages.contains(&nupkg_path.file_name().unwrap().to_str().unwrap().to_owned())
+        {
+            continue;
+        }
+
         let nupkg_metadata_path = glob(path.join(".nupkg.metadata").to_str().unwrap())?
             .next()
             .unwrap()?;
@@ -81,15 +100,31 @@ fn read_package_dir(package_dir: PathBuf) -> anyhow::Result<Vec<Package>> {
         let nupkg_metadata: NupkgMetadata =
             serde_json::from_str(&fs::read_to_string(&nupkg_metadata_path)?)?;
 
+        // Skip non-url sources
+        let source = match Url::parse(&nupkg_metadata.source) {
+            Ok(it) => it,
+            Err(_) => continue,
+        };
+
         packages.push(Package {
             id: nuspec.metadata.id,
             version: nuspec.metadata.version,
-            source: nupkg_metadata.source,
+            source: source,
             nupkg_path,
         });
     }
 
     Ok(packages)
+}
+
+// The output is wrapped in a Result to allow matching on errors.
+// Returns an Iterator to the Reader of the lines of the file.
+fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(filename)?;
+    Ok(io::BufReader::new(file).lines())
 }
 
 #[derive(Deserialize)]
@@ -115,7 +150,7 @@ pub struct Package {
 
 #[derive(Deserialize)]
 struct NupkgMetadata {
-    source: Url,
+    source: String,
 }
 
 #[derive(Deserialize)]

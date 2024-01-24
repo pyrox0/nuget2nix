@@ -1,5 +1,5 @@
 #![warn(clippy::pedantic)]
-use std::env;
+use std::{env, path::PathBuf};
 
 use crate::nuget::NuGet;
 
@@ -10,7 +10,13 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let package_path = &args[1];
 
-    let nuget = NuGet::new(package_path.into())?;
+    let exclude_file: Option<PathBuf> = if args.len() > 2 {
+        Some((&args[2]).into())
+    } else {
+        None
+    };
+
+    let nuget = NuGet::new(package_path.into(), exclude_file)?;
 
     println!("{{fetchNuGet}}: [");
 
