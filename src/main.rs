@@ -1,5 +1,6 @@
 #![warn(clippy::pedantic)]
-use std::{env, path::PathBuf};
+use camino::Utf8PathBuf;
+use std::env;
 
 use crate::nuget::NuGet;
 
@@ -10,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let package_path = &args[1];
 
-    let exclude_file: Option<PathBuf> = if args.len() > 2 {
+    let exclude_file: Option<Utf8PathBuf> = if args.len() > 2 {
         Some((&args[2]).into())
     } else {
         None

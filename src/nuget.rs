@@ -2,10 +2,11 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     io::{self, BufRead},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use anyhow::Error;
+use camino::Utf8PathBuf;
 use glob::glob;
 use quick_cache::sync::Cache;
 use reqwest::blocking::Client;
@@ -19,7 +20,10 @@ pub struct NuGet {
 }
 
 impl NuGet {
-    pub fn new(package_dir: PathBuf, exclude_file: Option<PathBuf>) -> anyhow::Result<NuGet> {
+    pub fn new(
+        package_dir: Utf8PathBuf,
+        exclude_file: Option<Utf8PathBuf>,
+    ) -> anyhow::Result<NuGet> {
         let packages = read_package_dir(package_dir, exclude_file)?;
 
         return Ok(NuGet {
@@ -68,8 +72,8 @@ impl NuGet {
 }
 
 fn read_package_dir(
-    package_dir: PathBuf,
-    exclude_file: Option<PathBuf>,
+    package_dir: Utf8PathBuf,
+    exclude_file: Option<Utf8PathBuf>,
 ) -> anyhow::Result<Vec<Package>> {
     let mut packages = Vec::new();
 
@@ -78,22 +82,19 @@ fn read_package_dir(
         None => HashSet::new(),
     };
 
-    for mut path in glob(package_dir.join("**/*.nuspec").to_str().unwrap())?.map(Result::unwrap) {
+    for mut path in utf8_glob(package_dir.join("**/*.nuspec").as_str()) {
         let nuspec: Nuspec = quick_xml::de::from_str(&fs::read_to_string(&path)?)?;
 
         assert!(path.pop());
 
-        let nupkg_path = glob(path.join("*.nupkg").to_str().unwrap())?
-            .next()
-            .unwrap()?;
+        let nupkg_path: Utf8PathBuf = utf8_glob(path.join("*.nupkg").as_str()).next().unwrap();
 
         // Skip packages that have been excluded
-        if excluded_packages.contains(&nupkg_path.file_name().unwrap().to_str().unwrap().to_owned())
-        {
+        if excluded_packages.contains(&nupkg_path.file_name().unwrap().to_owned()) {
             continue;
         }
 
-        let nupkg_metadata_path = glob(path.join(".nupkg.metadata").to_str().unwrap())?
+        let nupkg_metadata_path = glob(path.join(".nupkg.metadata").as_str())?
             .next()
             .unwrap()?;
 
@@ -127,6 +128,12 @@ where
     Ok(io::BufReader::new(file).lines())
 }
 
+fn utf8_glob(pattern: &str) -> impl Iterator<Item = Utf8PathBuf> {
+    glob(pattern)
+        .expect("Failed to read glob pattern")
+        .map(|path| Utf8PathBuf::from_path_buf(path.unwrap()).unwrap())
+}
+
 #[derive(Deserialize)]
 struct ServiceIndex {
     resources: Vec<Resource>,
@@ -145,7 +152,7 @@ pub struct Package {
     pub id: String,
     pub version: String,
     pub source: Url,
-    pub nupkg_path: PathBuf,
+    pub nupkg_path: Utf8PathBuf,
 }
 
 #[derive(Deserialize)]

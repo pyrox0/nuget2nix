@@ -1,12 +1,12 @@
+use camino::Utf8PathBuf;
 use sha2::{Digest, Sha256};
 use nix_base32::to_nix_base32;
 use std::{
     fs::File,
     io::{BufReader, Read},
-    path::PathBuf,
 };
 
-pub fn hash(path: &PathBuf) -> anyhow::Result<String> {
+pub fn hash(path: &Utf8PathBuf) -> anyhow::Result<String> {
     let input = File::open(path)?;
     let mut reader = BufReader::new(input);
 
