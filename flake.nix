@@ -9,27 +9,19 @@
     fenix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = inputs @ {
-    nixpkgs,
-    flake-parts,
-    fenix,
-    ...
-  }:
-    flake-parts.lib.mkFlake {inherit inputs;} ({
-      withSystem,
-      flake-parts-lib,
-      ...
-    }: let
+  outputs = inputs @ {flake-parts, ...}:
+    flake-parts.lib.mkFlake {inherit inputs;} (let
+      devshell = ./nix/devshell.nix;
       flakeModule = ./flake-module.nix;
     in {
       imports = [
         inputs.devshell.flakeModule
-        ./devshell.nix
+        devshell
         flakeModule
       ];
 
       flake = {
-        flakeModule = flakeModule;
+        inherit flakeModule;
       };
 
       perSystem = {config, ...}: {
