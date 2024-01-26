@@ -29,7 +29,7 @@ in {
           name = "nuget-to-nix";
           runtimeInputs = [config.packages.nuget2nix];
           text = ''
-            nuget2nix --directory "$1"
+            nuget2nix "$1" "$2"
           '';
         }) {};
     };
