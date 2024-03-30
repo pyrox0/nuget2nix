@@ -19,10 +19,8 @@
           version = (lib.importTOML ./../Cargo.toml).package.version;
           src = ./..;
           cargoLock.lockFile = ./../Cargo.lock;
-          buildInputs = [pkgs.pkg-config pkgs.openssl ] ++ lib.optional stdenv.isDarwin [
-            pkgs.darwin.apple_sdk.frameworks.Security
-            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-          ];
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.pkg-config pkgs.openssl ];
         };
     };
   };
